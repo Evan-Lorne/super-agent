@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Super Agent App</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="module">
+      import { transform } from 'https://esm.sh/@babel/standalone@7.25.6';
+
+      const moduleCache = new Map();
+      const relativeImport = /\b(from\s*|import\s*\()\s*(['"])(\.{1,2}\/[^'"]+)\2/g;
+
+      async function rewriteRelativeImports(code, sourceUrl) {
+        const matches = [...code.matchAll(relativeImport)];
+        let rewritten = '';
+        let cursor = 0;
+
+        for (const match of matches) {
+          const dependencyUrl = new URL(match[3], sourceUrl).href;
+          const dependencyBlobUrl = await loadModule(dependencyUrl);
+          rewritten += code.slice(cursor, match.index);
+          rewritten += `${match[1]}${match[2]}${dependencyBlobUrl}${match[2]}`;
+          cursor = match.index + match[0].length;
+        }
+
+        return rewritten + code.slice(cursor);
+      }
+
+      async function loadModule(url) {
+        if (moduleCache.has(url)) return moduleCache.get(url);
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`无法加载 ${url}: HTTP ${response.status}`);
+
+        const source = await response.text();
+        const compiled = transform(source, {
+          filename: url,
+          presets: [
+            ['react', { runtime: 'classic' }],
+            ['typescript', { allExtensions: true, isTSX: true }],
+          ],
+        }).code;
+        const code = await rewriteRelativeImports(compiled, url);
+        const blobUrl = URL.createObjectURL(
+          new Blob([code], { type: 'application/javascript' }),
+        );
+
+        moduleCache.set(url, blobUrl);
+        return blobUrl;
+      }
+
+      try {
+        await import(await loadModule(new URL('./App.tsx', location.href).href));
+      } catch (error) {
+        console.error(error);
+        const root = document.getElementById('root');
+        root.textContent = `应用启动失败：${error.message}`;
+      }
+    </script>
+  </body>
+</html>
