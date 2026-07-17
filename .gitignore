@@ -5,3 +5,11 @@ dist/
 !.env.example
 .DS_Store
 *.log
+
+# Local runtime data
+.memory/
+.sessions/
+.cron/
+.usage/
+.pnpm-store/
+knowledge.db*
