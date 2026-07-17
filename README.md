@@ -9,7 +9,7 @@ pnpm install
 pnpm start
 ```
 
-退出交互程序时输入 `exit`。如需接入 OpenAI 兼容服务，在本地 `.env` 中配置 `OPEN_BASE_URL` 和 `OPENAI_API_KEY`，然后在 `src/index.ts` 中启用对应模型。请勿提交 `.env` 文件。
+退出交互程序时输入 `exit`。如需接入 OpenAI 兼容服务，在本地 `.env` 中配置 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`，然后在 `src/index.ts` 中启用对应模型。请勿提交 `.env` 文件。
 
 ## 文件说明
 
