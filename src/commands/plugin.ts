@@ -1,10 +1,11 @@
 import type { CommandHandler } from './index.js';
 import type { PluginManager } from '../plugins/manager.js';
-import type { PluginDefinition } from '../plugins/types.js';
+import type { PluginConfig, PluginDefinition } from '../plugins/types.js';
 
 export function createPluginCommands(
   pluginManager: PluginManager,
   availablePlugins: Map<string, PluginDefinition>,
+  configuredPlugins: Map<string, PluginConfig>,
 ): CommandHandler[] {
   return [
     // /plugin 或 /plugin list
@@ -55,7 +56,7 @@ export function createPluginCommands(
         return true;
       }
 
-      pluginManager.load(def).then(tools => {
+      pluginManager.load(def, configuredPlugins.get(name)).then(tools => {
         console.log(`\n[plugins] 已加载 ${name}，注册了 ${tools.length} 个工具：`);
         for (const t of tools) console.log(`    ${t}`);
         console.log('');

@@ -10,7 +10,11 @@ export const ModelConfigSchema = z.object({
 export const PluginConfigSchema = z.object({
   name: z.string(),
   enabled: z.boolean().default(true),
-  config: z.record(z.string(), z.unknown()).default({}),
+  config: z.record(z.string(), z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+  ])).default({}),
 });
 
 export const FeishuChannelConfigSchema = z.object({
@@ -31,7 +35,7 @@ export const AgentConfigSchema = z.object({
 });
 
 export const SecurityConfigSchema = z.object({
-  defaultRole: z.string().default('developer'),
+  defaultRole: z.enum(['owner', 'collaborator', 'guest']).default('owner'),
   auditLog: z.boolean().default(true),
   bashTimestamp: z.boolean().default(true),
 });

@@ -47,7 +47,7 @@ export async function spawnAgent(
   };
   ctx.agentRegistry.register(run);
 
-  const timeout = request.timeout || 60000;
+  const timeout = request.timeout ?? ctx.agentRegistry.getConfig().defaultTimeout;
   const maxSteps = 30;
   const ac = new AbortController();
   console.log(`  ${tag} 启动: ${request.task.slice(0, 50)}`);

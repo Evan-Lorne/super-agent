@@ -64,7 +64,7 @@ export async function runInit() {
       },
     },
     agents: { maxSpawnDepth: 1, maxConcurrent, defaultTimeout: 60000 },
-    security: { defaultRole: 'developer', auditLog: true, bashTimestamp: true },
+    security: { defaultRole: 'owner', auditLog: true, bashTimestamp: true },
     memory: { dataDir: '.' },
     rag: { enabled: true, docsDir: 'docs', apiKey: '${ALIYUN_API_KEY}' },
     cron: { enabled: true, dataDir: '.' },

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { loadConfig } from './config/loader.js';
 import type { SuperAgentConfig } from './config/schema.js';
 import fs from 'node:fs';
+import path from 'node:path';
 import { type ModelMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createMockModel } from './mock-model.js';
@@ -56,13 +57,18 @@ const config = loadConfig();
 
 function createModel(cfg: SuperAgentConfig['model']) {
   if (!cfg.apiKey) return createMockModel();
-  const provider = createOpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const provider = createOpenAI({
+    name: cfg.provider,
+    baseURL: cfg.baseURL,
+    apiKey: cfg.apiKey
+  });
   return provider.chat(cfg.name);
 }
 const model = createModel(config.model);
 
 // ── Registry ────────────────────────────────────────
 const registry = new ToolRegistry();
+registry.setRole(config.security.defaultRole);
 registry.register(...allTools);
 registry.register(createToolSearchTool(registry));
 
@@ -76,7 +82,9 @@ const vectorStore = new VectorStore();
 const embedFn = config.rag.apiKey
   ? createDashScopeEmbedder(config.rag.apiKey)
   : createMockEmbedder();
-registry.register(...createRagTools(vectorStore, embedFn));
+if (config.rag.enabled) {
+  registry.register(...createRagTools(vectorStore, embedFn));
+}
 
 async function connectMCP() {
   const mockClient = new MockMCPClient();
@@ -94,6 +102,9 @@ const pluginManager = new PluginManager(registry);
 const availablePlugins = new Map<string, PluginDefinition>([
   ['supabase', supabasePlugin],
 ]);
+const configuredPlugins = new Map(
+  config.plugins.map(plugin => [plugin.name, plugin.config]),
+);
 
 // ── Security: Hook Pipeline ────────────────────────────────────────
 const hookPipeline = new HookPipeline();
@@ -122,13 +133,16 @@ if (config.security.bashTimestamp) {
 registry.setHookPipeline(hookPipeline);
 
 // ── Cron Service ────────────────────────────────────────
-const cronService = new CronService(config.cron.dataDir);
-registry.register(createCronTool(cronService));
+const cronService = config.cron.enabled
+  ? new CronService(config.cron.dataDir)
+  : undefined;
+if (cronService) registry.register(createCronTool(cronService));
 
 // ── Sub-Agent ────────────────────────────────────────
 const agentRegistry = new SubAgentRegistry({
   maxSpawnDepth: config.agents.maxSpawnDepth,
   maxConcurrent: config.agents.maxConcurrent,
+  defaultTimeout: config.agents.defaultTimeout,
 });
 
 function getSpawnCtx(): SpawnContext {
@@ -148,8 +162,9 @@ const builder = new PromptBuilder()
   .pipe('coreRules', coreRules())
   .pipe('toolGuide', toolGuide())
   .pipe('deferredTools', deferredTools())
-  .pipe('memoryContext', memoryContext(memoryStore))
-  .pipe('ragContext', ragContext(vectorStore))
+  .pipe('memoryContext', memoryContext(memoryStore));
+if (config.rag.enabled) builder.pipe('ragContext', ragContext(vectorStore));
+builder
   .pipe('skillContext', () => skillLoader.buildPromptSection(activeSkills))
   .pipe('sessionContext', sessionContext());
 
@@ -181,13 +196,13 @@ const dispatch = createDispatcher([
   ...debugCommands,
   ...contextCommands,
   ...memoryCommands,
-  ...ragCommands,
+  ...(config.rag.enabled ? ragCommands : []),
   ...dreamCommands,
   ...createSkillCommands(skillLoader, activeSkills),
-  ...createPluginCommands(pluginManager, availablePlugins),
+  ...createPluginCommands(pluginManager, availablePlugins, configuredPlugins),
   ...createChannelCommands(gateway),
   ...createSecurityCommands(registry, hookPipeline),
-  ...createCronCommands(cronService),
+  ...(cronService ? createCronCommands(cronService) : []),
   ...createAgentCommands(agentRegistry),
 ]);
 
@@ -217,7 +232,7 @@ export async function startAgent() {
     const def = availablePlugins.get(pluginCfg.name);
     if (!def) { console.log(`  ✗ ${pluginCfg.name} — 未知插件`); continue; }
     if (!pluginCfg.enabled) { console.log(`  - ${pluginCfg.name} — 已禁用`); continue; }
-    const tools = await pluginManager.load(def);
+    const tools = await pluginManager.load(def, pluginCfg.config);
     console.log(`  ✓ ${pluginCfg.name} — ${tools.length} 个工具`);
   }
 
@@ -227,34 +242,35 @@ export async function startAgent() {
   await gateway.startAll();
 
   // 启动 Cron
-  cronService.load();
-  cronService.setExecutor({
-    runAgentPrompt: async (prompt, timeout) => {
-      const cronMessages: ModelMessage[] = [{ role: 'user', content: prompt }];
-      const system = builder.build(makePromptCtx());
-      await agentLoop(model, registry, cronMessages, system);
-      const lastMsg = cronMessages[cronMessages.length - 1];
-      if (!lastMsg) return '(无输出)';
-      if (typeof lastMsg.content === 'string') return lastMsg.content;
-      if (Array.isArray(lastMsg.content)) {
-        return lastMsg.content
-          .filter((p: any) => p.type === 'text')
-          .map((p: any) => p.text)
-          .join('') || '(无输出)';
-      }
-      return String(lastMsg.content);
-    },
-    notify: (message) => {
-      console.log(`\n${message}`);
-    },
-  });
-  cronService.start();
-  const cronJobs = cronService.list();
+  if (cronService) {
+    cronService.load();
+    cronService.setExecutor({
+      runAgentPrompt: async (prompt, timeout) => {
+        const cronMessages: ModelMessage[] = [{ role: 'user', content: prompt }];
+        const system = builder.build(makePromptCtx());
+        await agentLoop(model, registry, cronMessages, system);
+        const lastMsg = cronMessages[cronMessages.length - 1];
+        if (!lastMsg) return '(无输出)';
+        if (typeof lastMsg.content === 'string') return lastMsg.content;
+        if (Array.isArray(lastMsg.content)) {
+          return lastMsg.content
+            .filter((p: any) => p.type === 'text')
+            .map((p: any) => p.text)
+            .join('') || '(无输出)';
+        }
+        return String(lastMsg.content);
+      },
+      notify: (message) => {
+        console.log(`\n${message}`);
+      },
+    });
+    cronService.start();
+  }
 
-  const store = new SessionStore('default');
+  const store = new SessionStore(config.session.id);
   let messages: ModelMessage[] = [];
   const timestamps = new Map<number, number>();
-  const tracker = new UsageTracker('.usage/today.jsonl');
+  const tracker = new UsageTracker(config.usage.trackingFile);
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
@@ -263,7 +279,7 @@ export async function startAgent() {
       const trimmed = input.trim();
       if (!trimmed || trimmed === 'exit') {
         console.log('Bye!');
-        cronService.stop();
+        cronService?.stop();
         await gateway.stopAll();
         await pluginManager.unloadAll();
         rl.close();
@@ -305,7 +321,7 @@ export async function startAgent() {
   console.log('Super Agent v1.0 (type "exit" to quit)');
   console.log('快捷命令：');
   console.log('  /agents           — 查看子 Agent 记录');
-  console.log('  /cron             — 查看定时任务');
+  if (cronService) console.log('  /cron             — 查看定时任务');
   console.log('  /role [角色]      — 查看/切换角色');
   console.log('');
   console.log(`  当前角色: ${role}，可用工具: ${toolCount} 个`);
@@ -316,14 +332,14 @@ export async function startAgent() {
   console.log('    /agents       — 查看子 Agent 执行记录');
   console.log('');
 
-  if (fs.existsSync('docs')) {
-    const files = fs.readdirSync('docs').filter(f => f.endsWith('.md'));
+  if (config.rag.enabled && fs.existsSync(config.rag.docsDir)) {
+    const files = fs.readdirSync(config.rag.docsDir).filter(f => f.endsWith('.md'));
     if (files.length > 0) {
       console.log(`  发现 ${files.length} 个文档，自动导入知识库...`);
       for (const f of files) {
-        const path = `docs/${f}`;
-        const text = fs.readFileSync(path, 'utf-8');
-        const chunks = chunkDocument(path, text);
+        const docPath = path.join(config.rag.docsDir, f);
+        const text = fs.readFileSync(docPath, 'utf-8');
+        const chunks = chunkDocument(docPath, text);
         const embeddings = await embed(embedFn, chunks.map(c => c.text));
         vectorStore.addBatch(chunks.map((c, i) => ({ chunk: c, embedding: embeddings[i] })));
       }
