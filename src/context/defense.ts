@@ -1,4 +1,5 @@
 import type { ModelMessage } from 'ai';
+import { isToolOutputError, replaceToolOutputText, toolOutputToText } from './tool-output.js';
 
 // ── Layer 1: Token Estimation ────────────────────────
 
@@ -42,10 +43,7 @@ export function estimateMessageTokens(messages: ModelMessage[]): number {
         if ('text' in part && typeof part.text === 'string') {
           chars += part.text.length;
         } else if ('output' in part) {
-          const out = typeof part.output === 'string'
-            ? part.output
-            : JSON.stringify(part.output);
-          chars += out.length;
+          chars += toolOutputToText(part.output).length;
         }
       }
     }
@@ -78,19 +76,22 @@ export function truncateToolResults(
     if (msg.role !== 'tool' || !Array.isArray(msg.content)) return msg;
 
     const newContent = msg.content.map((part: any) => {
-      if (!part.output || typeof part.output !== 'string') return part;
-      if (part.output.length <= config.maxSingleResult) return part;
+      const output = toolOutputToText(part.output);
+      if (output.length <= config.maxSingleResult) return part;
 
       truncated++;
       const maxChars = config.maxSingleResult;
       const headSize = Math.floor(maxChars * 0.6);
       const tailSize = Math.floor(maxChars * 0.4);
-      const head = part.output.slice(0, headSize);
-      const tail = part.output.slice(-tailSize);
+      const head = output.slice(0, headSize);
+      const tail = output.slice(-tailSize);
 
       return {
         ...part,
-        output: `${head}\n\n[truncated: ${part.output.length} → ${maxChars} chars]\n\n${tail}`,
+        output: replaceToolOutputText(
+          part.output,
+          `${head}\n\n[truncated: ${output.length} → ${maxChars} chars]\n\n${tail}`,
+        ),
       };
     });
 
@@ -102,7 +103,7 @@ export function truncateToolResults(
     if (typeof msg.content === 'string') return sum + msg.content.length;
     if (Array.isArray(msg.content)) {
       return sum + (msg.content as any[]).reduce((s, p) =>
-        s + ((p.output as string)?.length || (p.text as string)?.length || 0), 0);
+        s + ('output' in p ? toolOutputToText(p.output).length : (p.text as string)?.length || 0), 0);
     }
     return sum;
   }, 0);
@@ -113,12 +114,12 @@ export function truncateToolResults(
       if (msg.role !== 'tool' || !Array.isArray(msg.content)) continue;
       const toolName = ((msg.content as any[])[0])?.toolName || 'unknown';
       const oldSize = (msg.content as any[]).reduce((s: number, p: any) =>
-        s + ((p.output as string)?.length || 0), 0);
+        s + ('output' in p ? toolOutputToText(p.output).length : 0), 0);
       result[i] = {
         ...msg,
         content: (msg.content as any[]).map((p: any) => ({
           ...p,
-          output: `[compacted: ${toolName} output removed to free context]`,
+          output: replaceToolOutputText(p.output, `[compacted: ${toolName} output removed to free context]`),
         })),
       };
       totalChars -= oldSize;
@@ -168,10 +169,10 @@ export function ttlPrune(
     const age = now - ts;
 
     // Preserve error experiences — never prune failed tool results
-    const outputText = (msg.content as any[])
-      .map((p: any) => typeof p.output === 'string' ? p.output : '')
-      .join('');
-    const isError = /error|失败|不存在|denied|refused|timeout/i.test(outputText);
+    const parts = msg.content as any[];
+    const outputText = parts.map((p: any) => toolOutputToText(p.output)).join('');
+    const isError = parts.some((p: any) => isToolOutputError(p.output))
+      || /error|失败|不存在|denied|refused|timeout/i.test(outputText);
     if (isError) return msg;
 
     // Hard clear: replace entire content with placeholder
@@ -182,7 +183,7 @@ export function ttlPrune(
         ...msg,
         content: msg.content.map((part: any) => ({
           ...part,
-          output: `[tool result expired: ${toolName}]`,
+          output: replaceToolOutputText(part.output, `[tool result expired: ${toolName}]`),
         })),
       };
     }
@@ -190,17 +191,20 @@ export function ttlPrune(
     // Soft prune: keep head + tail, replace middle
     if (age >= config.softTTLMs) {
       const newContent = msg.content.map((part: any) => {
-        if (!part.output || typeof part.output !== 'string') return part;
-        if (part.output.length <= config.keepHeadTail * 2) return part;
+        const output = toolOutputToText(part.output);
+        if (output.length <= config.keepHeadTail * 2) return part;
 
         softPruned++;
-        const head = part.output.slice(0, config.keepHeadTail);
-        const tail = part.output.slice(-config.keepHeadTail);
-        const removed = part.output.length - config.keepHeadTail * 2;
+        const head = output.slice(0, config.keepHeadTail);
+        const tail = output.slice(-config.keepHeadTail);
+        const removed = output.length - config.keepHeadTail * 2;
 
         return {
           ...part,
-          output: `${head}\n\n[soft pruned: ${removed} chars removed, content older than ${Math.round(config.softTTLMs / 60000)}min]\n\n${tail}`,
+          output: replaceToolOutputText(
+            part.output,
+            `${head}\n\n[soft pruned: ${removed} chars removed, content older than ${Math.round(config.softTTLMs / 60000)}min]\n\n${tail}`,
+          ),
         };
       });
       return { ...msg, content: newContent };

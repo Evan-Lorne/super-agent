@@ -45,7 +45,7 @@ export function createMemoryTool(memoryStore: MemoryStore): ToolDefinition {
           const results = memoryStore.search(args.query || '');
           if (results.length === 0) return `没有找到与 "${args.query}" 相关的记忆。`;
           return `搜索结果（${results.length} 条匹配）：\n` +
-            results.map(e => `  [${e.type}] ${e.name} — ${e.description}`).join('\n');
+            results.map(({ entry }) => `  [${entry.type}] ${entry.name} — ${entry.description}`).join('\n');
         }
         case 'read': {
           if (!args.filename) return '读取失败：需要 filename 参数';

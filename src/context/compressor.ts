@@ -1,4 +1,5 @@
 import { generateText, type ModelMessage } from 'ai';
+import { replaceToolOutputText } from './tool-output.js';
 
 /** Estimate token count: ~4 chars per token for mixed Chinese/English. */
 function estimateTokens(messages: ModelMessage[]): number {
@@ -57,7 +58,7 @@ export function microcompact(messages: ModelMessage[]): {
       ...msg,
       content: msg.content.map((part: any) => ({
         ...part,
-        output: '[tool result cleared]',
+        output: replaceToolOutputText(part.output, '[tool result cleared]'),
       })),
     };
   });

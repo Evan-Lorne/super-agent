@@ -22,7 +22,7 @@
   },
   "agents": {
     "maxSpawnDepth": 1,
-    "maxConcurrent": 11,
+    "maxConcurrent": 10,
     "defaultTimeout": 60000
   },
   "security": {

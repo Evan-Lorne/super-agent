@@ -10,7 +10,7 @@ export const ModelConfigSchema = z.object({
 export const PluginConfigSchema = z.object({
   name: z.string(),
   enabled: z.boolean().default(true),
-  config: z.record(z.string()).default({}),
+  config: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const FeishuChannelConfigSchema = z.object({
@@ -21,7 +21,7 @@ export const FeishuChannelConfigSchema = z.object({
 });
 
 export const ChannelConfigSchema = z.object({
-  feishu: FeishuChannelConfigSchema.default({}),
+  feishu: FeishuChannelConfigSchema.prefault({}),
 });
 
 export const AgentConfigSchema = z.object({
@@ -43,7 +43,7 @@ export const MemoryConfigSchema = z.object({
 export const RagConfigSchema = z.object({
   enabled: z.boolean().default(true),
   docsDir: z.string().default('docs'),
-  apikey: z.string().default('')
+  apiKey: z.string().default(''),
 });
 
 export const CronConfigSchema = z.object({
@@ -61,16 +61,16 @@ export const UsageConfigSchema = z.object({
 
 export const SuperAgentConfigSchema = z.object({
   version: z.string().default('1.0'),
-  model: ModelConfigSchema.default({}),
+  model: ModelConfigSchema.prefault({}),
   plugins: z.array(PluginConfigSchema).default([]),
-  channels: ChannelConfigSchema.default({}),
-  agents: AgentConfigSchema.default({}),
-  security: SecurityConfigSchema.default({}),
-  memory: MemoryConfigSchema.default({}),
-  rag: RagConfigSchema.default({}),
-  cron: CronConfigSchema.default({}),
-  session: SessionConfigSchema.default({}),
-  usage: UsageConfigSchema.default({}),
+  channels: ChannelConfigSchema.prefault({}),
+  agents: AgentConfigSchema.prefault({}),
+  security: SecurityConfigSchema.prefault({}),
+  memory: MemoryConfigSchema.prefault({}),
+  rag: RagConfigSchema.prefault({}),
+  cron: CronConfigSchema.prefault({}),
+  session: SessionConfigSchema.prefault({}),
+  usage: UsageConfigSchema.prefault({}),
 });
 
 export type SuperAgentConfig = z.infer<typeof SuperAgentConfigSchema>;
